@@ -1,0 +1,53 @@
+# ============================================
+# Vivado Generated Files
+# ============================================
+
+*.jou
+*.log
+*.str
+
+# Vivado project directories
+.cache/
+.hw/
+.ip_user_files/
+.sim/
+.gen/
+.xpr
+
+# Generated Vivado project files
+*.runs/
+*.data/
+*.ltx
+
+# Synthesis / implementation generated files
+*.dcp
+*.rpt
+*.pb
+*.xmsgs
+
+# Vivado generated simulation files
+*.wdb
+*.wcfg
+
+# Generated bitstreams
+*.bit
+*.bin
+*.mcs
+*.prm
+
+# Generated hardware handoff files
+*.hwh
+
+# Temporary / backup files
+*.bak
+*.tmp
+*.swp
+*~
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
