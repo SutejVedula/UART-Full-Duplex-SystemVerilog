@@ -1,8 +1,8 @@
-# UART Full-Duplex Transceiver — SystemVerilog
+# UART Full-Duplex Transceiver — SystemVerilog RTL
 
-A parameterized UART Full-Duplex Transceiver designed and verified in SystemVerilog using AMD/Xilinx Vivado.
+A parameterized **UART Full-Duplex Transceiver** designed and implemented in **SystemVerilog RTL** using AMD Vivado.
 
-The project implements independent UART transmitter and receiver modules, integrates them into a full-duplex top-level design, and validates functionality through simulation, synthesis, implementation, timing analysis, and FPGA resource utilization analysis.
+The project implements independent UART transmitter and receiver modules with finite state machines, configurable clock and baud-rate parameters, automated simulation testbenches, full-duplex loopback verification, synthesis, implementation, resource utilization analysis, and static timing analysis.
 
 ---
 
@@ -10,216 +10,445 @@ The project implements independent UART transmitter and receiver modules, integr
 
 UART (Universal Asynchronous Receiver/Transmitter) is a widely used asynchronous serial communication protocol.
 
-This project implements an **8N1 UART Full-Duplex Transceiver** supporting simultaneous transmission and reception.
+This project implements a complete **8N1 UART communication system**, consisting of:
 
-### UART Configuration
+- UART Transmitter (TX)
+- UART Receiver (RX)
+- Top-level integration module
+- Parameterized baud-rate generation
+- TX and RX finite state machines
+- Automated SystemVerilog testbenches
+- Full-duplex loopback verification
+- RTL architecture documentation
+- FPGA synthesis and implementation analysis
+- Timing analysis
+- Resource utilization analysis
 
-| Parameter | Value |
+The design is written to be reusable by allowing the clock frequency and baud rate to be configured through parameters.
+
+---
+
+## UART Configuration
+
+The implemented UART communication format is:
+
+| Parameter | Configuration |
 |---|---|
 | Data Bits | 8 |
 | Parity | None |
 | Stop Bits | 1 |
 | Format | 8N1 |
-| Default Clock | 50 MHz |
-| Default Baud Rate | 9600 |
 | Data Order | LSB First |
-| Target FPGA | AMD/Xilinx Artix-7 |
-| Target Part | `xc7a35tcpg236-1` |
+| Default Clock Frequency | 50 MHz |
+| Default Baud Rate | 9600 |
+
+### UART Frame
+
+Each transmitted byte follows this structure:
+
+```text
+Idle   Start     Data Bits                  Stop
+ 1       0     D0 D1 D2 D3 D4 D5 D6 D7        1
+```
+
+For example, for the byte:
+
+```text
+10110010
+```
+
+The data is transmitted LSB first:
+
+```text
+0 1 0 0 1 1 0 1
+```
+
+Therefore, the complete UART frame is:
+
+```text
+Start | D0 D1 D2 D3 D4 D5 D6 D7 | Stop
+  0   |  0  1  0  0  1  1  0  1 |  1
+```
+
+---
+
+# RTL Architecture
+
+![UART RTL Architecture](docs/rtl_architecture.png)
+
+The architecture consists of independent parameterized UART transmitter and receiver FSMs integrated through `uart_top.sv`.
+
+The diagram illustrates the parallel-to-serial TX path, serial-to-parallel RX path, UART 8N1 framing, and the loopback connection used during full-duplex verification.
 
 ---
 
 ## Architecture
 
-The design consists of three main RTL modules:
+The design is divided into three main RTL modules:
 
-``
-                    UART FULL-DUPLEX SYSTEM
-                            │
-              ┌─────────────┴─────────────┐
-              │                           │
-              ▼                           ▼
-       ┌──────────────┐           ┌──────────────┐
-       │   UART TX    │           │   UART RX    │
-       │              │           │              │
-       │ IDLE         │           │ IDLE         │
-       │ START        │           │ START        │
-       │ DATA         │           │ DATA         │
-       │ STOP         │           │ STOP         │
-       └──────┬───────┘           └──────▲───────┘
-              │                          │
-              │        Serial Line       │
-              └──────────────────────────┘
+```text
+                    +--------------------------+
+                    |       uart_top.sv        |
+                    |                          |
+                    |   +------------------+   |
+tx_start ---------->|   |    UART TX       |-----> TX
+tx_data[7:0] ------>|   |   uart_tx.sv     |   |
+                    |   +------------------+   |
+                    |                          |
+                    |   +------------------+   |
+RX ---------------->|   |    UART RX       |<----- RX
+                    |   |   uart_rx.sv     |   |
+                    |   +------------------+   |
+                    +--------------------------+
+```
 
-Transmitter
+### Module Responsibilities
 
-The transmitter converts an 8-bit parallel data word into a UART serial frame.
+#### `uart_tx.sv`
 
+Responsible for:
+
+- Accepting an 8-bit parallel input
+- Capturing the input byte
+- Generating the UART start bit
+- Serializing the data LSB first
+- Generating the stop bit
+- Indicating transmission status using `tx_busy`
+
+TX state machine:
+
+```text
 IDLE → START → DATA → STOP → IDLE
+```
 
-Frame format:
+---
 
-START | D0 | D1 | D2 | D3 | D4 | D5 | D6 | D7 | STOP
-  0      LSB                         MSB          1
-Receiver
+#### `uart_rx.sv`
 
-The receiver detects the start bit, samples the incoming serial data, reconstructs the 8-bit byte, validates the stop bit, and generates an rx_done pulse.
+Responsible for:
 
+- Detecting the UART start bit
+- Validating the start bit near the middle of the bit period
+- Sampling incoming serial data
+- Receiving 8 data bits
+- Reconstructing the received byte
+- Validating the stop bit
+- Generating a one-clock `rx_done` pulse
+
+RX state machine:
+
+```text
 IDLE → START → DATA → STOP → IDLE
+```
 
-The receiver samples the start bit near its midpoint to improve robustness against timing uncertainty.
+The receiver rejects a frame when the expected stop bit is invalid.
 
-RTL Modules
-uart_tx.sv
+---
 
-Parameterized UART transmitter.
+#### `uart_top.sv`
 
-Responsibilities:
+Integrates the transmitter and receiver into a single UART subsystem.
 
-Accept 8-bit parallel input data
-Generate UART start bit
-Transmit data LSB first
-Generate stop bit
-Generate tx_busy status
-Support configurable clock frequency and baud rate
-uart_rx.sv
+It provides:
 
-Parameterized UART receiver.
+- TX interface
+- RX interface
+- TX busy indication
+- Received data output
+- RX completion indication
+- Configurable clock and baud-rate parameters
 
-Responsibilities:
+---
 
-Detect UART start bit
-Validate the start bit
-Sample eight serial data bits
-Reconstruct the received byte
-Validate the stop bit
-Generate rx_done
-Reject invalid stop-bit frames
-uart_top.sv
+# Parameterization
 
-Top-level integration module connecting the transmitter and receiver into one UART full-duplex system.
+The UART modules are parameterized using:
 
-Parameterization
+```systemverilog
+parameter int CLK_FREQ_HZ = 50_000_000;
+parameter int BAUD_RATE   = 9_600;
+```
 
-The UART modules use configurable parameters:
+The number of clock cycles required for one UART bit is calculated as:
 
-parameter int CLK_FREQ_HZ = 50_000_000,
-parameter int BAUD_RATE   = 9_600
-
-The number of FPGA clock cycles per UART bit is calculated as:
-
+```systemverilog
 localparam int CLKS_PER_BIT = CLK_FREQ_HZ / BAUD_RATE;
+```
 
 For the default configuration:
 
+```text
 Clock Frequency = 50 MHz
 Baud Rate       = 9600
 
-Therefore:
-
 CLKS_PER_BIT ≈ 5208
-Verification
+```
 
-The design was verified using Vivado Simulator with separate testbenches for the transmitter, receiver, and integrated full-duplex system.
+This allows the same RTL architecture to be adapted for different clock frequencies and UART baud rates.
 
-TX Verification
+---
 
-Test patterns:
+# Signal Interface
 
+## UART Transmitter
+
+| Signal | Direction | Description |
+|---|---|---|
+| `clk` | Input | System clock |
+| `reset` | Input | Synchronous reset |
+| `tx_start` | Input | Starts transmission |
+| `data_in[7:0]` | Input | Byte to transmit |
+| `tx` | Output | UART serial output |
+| `tx_busy` | Output | High while transmitting |
+
+---
+
+## UART Receiver
+
+| Signal | Direction | Description |
+|---|---|---|
+| `clk` | Input | System clock |
+| `reset` | Input | Synchronous reset |
+| `rx` | Input | UART serial input |
+| `data_out[7:0]` | Output | Received byte |
+| `rx_done` | Output | One-clock pulse when reception completes |
+
+---
+
+# Verification
+
+The project uses dedicated SystemVerilog testbenches for:
+
+1. UART transmitter
+2. UART receiver
+3. Full-duplex UART system
+
+The testbenches use multiple data patterns to exercise normal and edge-case behavior.
+
+---
+
+## TX Verification
+
+The transmitter was tested using the following data patterns:
+
+```text
 B2
 CA
 00
 FF
 AA
 55
+```
 
-The transmitter waveform was inspected to verify:
+The testbench verifies:
 
-Idle-high UART line
-Start bit
-LSB-first transmission
-Eight data bits
-Stop bit
-tx_busy operation
-RX Verification
+- Start bit generation
+- Data serialization
+- LSB-first transmission
+- Stop bit generation
+- `tx_busy` behavior
+- Correct UART timing
 
-Test patterns:
+### TX Result
 
+```text
+Total Tests : 6
+Failed Tests: 0
+
+STATUS: PASS
+```
+
+---
+
+## RX Verification
+
+The receiver was tested using:
+
+```text
 B2
 CA
 00
 FF
 AA
 55
+```
 
-Additional verification:
+The testbench verifies:
 
-Invalid stop-bit frame
-Stop-bit rejection
-rx_done completion pulse
-Correct reconstructed data
-Full-Duplex Verification
+- Start-bit detection
+- Mid-bit start validation
+- Data sampling
+- LSB-first reconstruction
+- Stop-bit validation
+- `rx_done` generation
 
-A loopback connection was used:
+An invalid stop-bit test was also included to verify that malformed UART frames are rejected.
 
-UART TX ─────────────► UART RX
+### RX Result
 
-The following patterns were transmitted and checked at the receiver:
+```text
+Valid Tests : 6
+Failed Tests: 0
 
-B2
-CA
-00
-FF
-AA
-55
+STATUS: PASS
+```
 
-All six patterns were successfully verified in the completed simulation.
+---
 
-Simulation Results
-UART Transmitter
+# Full-Duplex Verification
 
-UART Receiver
+The complete UART system was verified using a direct serial loopback connection:
 
-Full-Duplex Loopback
+```systemverilog
+assign rx = tx;
+```
 
-FPGA Implementation
+This connects the transmitter output directly to the receiver input.
 
-The design was synthesized and implemented using:
+The following patterns were transmitted and received:
 
-AMD/Xilinx Vivado
-Artix-7 target architecture
+```text
+10110010
+11001010
+00000000
+11111111
+10101010
+01010101
+```
+
+### Full-Duplex Result
+
+```text
+Total Tests : 6
+Failed Tests: 0
+
+STATUS: PASS
+```
+
+The successful loopback verification demonstrates correct integration between the transmitter and receiver RTL.
+
+---
+
+# Simulation Results
+
+The project was simulated using **AMD Vivado XSim**.
+
+Simulation waveforms were captured for:
+
+- TX operation
+- RX operation
+- Full-duplex loopback
+
+## TX Waveform
+
+![TX Waveform](docs/tx_waveform.png)
+
+The waveform demonstrates UART transmission through the start bit, eight data bits, and stop bit.
+
+---
+
+## RX Waveform
+
+![RX Waveform](docs/rx_waveform.png)
+
+The waveform demonstrates serial data sampling, byte reconstruction, and `rx_done` generation.
+
+---
+
+## Full-Duplex Waveform
+
+![Full-Duplex Waveform](docs/full_duplex_waveform.png)
+
+The full-duplex waveform demonstrates the transmitted serial data being received correctly through the loopback connection.
+
+---
+
+# FPGA Synthesis
+
+The design was synthesized using **AMD Vivado** targeting the following Artix-7 FPGA:
+
+```text
 Device: xc7a35tcpg236-1
+Family: Artix-7
+```
 
-Implementation completed successfully.
+Synthesis completed successfully.
 
-Resource Utilization
+The implementation was also completed successfully in Vivado.
 
-Post-implementation utilization included approximately:
+---
 
-Resource	Used
-Slice LUTs	198
-Slice Registers	157
-Slices	101
-Bonded IOBs	23
-BUFGCTRL	1
+# Resource Utilization
 
-Timing Analysis
+Post-implementation resource utilization was analyzed using Vivado.
 
-Post-implementation timing analysis reported:
+| Resource | Used | Available |
+|---|---:|---:|
+| Slice LUTs | 198 | 20,800 |
+| Slice Registers | 157 | 41,600 |
+| Slices | 101 | 8,150 |
+| LUT as Logic | 198 | 20,800 |
+| Bonded IOB | 23 | 106 |
+| BUFGCTRL | 1 | 32 |
 
-Metric	Result
-Worst Negative Slack (WNS)	13.738 ns
-Total Negative Slack (TNS)	0.000 ns
-Worst Hold Slack (WHS)	0.168 ns
-Total Hold Slack (THS)	0.000 ns
-Failing Setup Endpoints	0
-Failing Hold Endpoints	0
+### Utilization Report
+
+![Resource Utilization](docs/utilization.png)
+
+The implemented UART design occupies a small portion of the available Artix-7 resources.
+
+---
+
+# Timing Analysis
+
+Static timing analysis was performed after implementation using Vivado.
+
+### Timing Summary
+
+| Metric | Result |
+|---|---:|
+| Worst Negative Slack (WNS) | 13.738 ns |
+| Total Negative Slack (TNS) | 0.000 ns |
+| Failing Setup Endpoints | 0 |
+| Worst Hold Slack (WHS) | 0.168 ns |
+| Total Hold Slack (THS) | 0.000 ns |
+| Failing Hold Endpoints | 0 |
+| Worst Pulse Width Slack | 9.500 ns |
+| Total Pulse Width Negative Slack | 0.000 ns |
+| Failing Pulse Width Endpoints | 0 |
 
 Vivado reported that all user-specified timing constraints were met.
 
-Project Structure
+![Timing Summary](docs/timing_summary.png)
+
+---
+
+# Implementation Breakdown
+
+The main implemented RTL modules contributed approximately:
+
+```text
+uart_rx
+    128 LUTs
+     83 Registers
+
+uart_tx
+     70 LUTs
+     74 Registers
+```
+
+The design uses independent transmitter and receiver state machines with counters for UART timing and bit sequencing.
+
+---
+
+# Project Structure
+
+```text
 UART-Full-Duplex-SystemVerilog/
 │
 ├── README.md
+├── LICENSE
+├── .gitignore
 │
 ├── rtl/
 │   ├── uart_tx.sv
@@ -233,102 +462,158 @@ UART-Full-Duplex-SystemVerilog/
 │
 └── docs/
     ├── README.md
+    ├── rtl_architecture.png
     ├── tx_waveform.png
     ├── rx_waveform.png
     ├── full_duplex_waveform.png
     ├── utilization.png
     └── timing_summary.png
-Tools & Technologies
-SystemVerilog
-RTL Design
-Finite State Machines
-UART Serial Communication
-Vivado Simulator
-Vivado Synthesis
-Vivado Implementation
-Static Timing Analysis
-FPGA Resource Utilization Analysis
-Skills Demonstrated
+```
+
+---
+
+# Tools & Technologies
+
+- SystemVerilog
+- RTL Design
+- AMD Vivado
+- Vivado XSim
+- Artix-7 FPGA architecture
+- Finite State Machines
+- Static Timing Analysis
+- FPGA Synthesis
+- FPGA Implementation
+- GitHub
+
+---
+
+# Skills Demonstrated
 
 This project demonstrates practical experience in:
 
-SystemVerilog RTL design
-Synchronous digital design
-FSM design
-Serial communication protocols
-Parameterized hardware design
-Testbench development
-Simulation-based verification
-Waveform debugging
-FPGA synthesis
-FPGA implementation
-Timing analysis
-Resource utilization analysis
-Hardware design documentation
-Verification Summary
-                    ┌──────────────────────┐
-                    │    UART TX TEST      │
-                    │   6 Test Patterns    │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │    UART RX TEST      │
-                    │   6 Test Patterns    │
-                    │ + Invalid Stop Test  │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ FULL-DUPLEX LOOPBACK │
-                    │   6 Patterns Tested  │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │ SYNTHESIS + P&R      │
-                    │      SUCCESS         │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                    ┌──────────────────────┐
-                    │   TIMING ANALYSIS    │
-                    │  No Failing Paths    │
-                    └──────────────────────┘
-Future Improvements
+- SystemVerilog RTL design
+- Sequential logic design
+- Finite State Machine design
+- Asynchronous serial communication
+- UART protocol implementation
+- Parallel-to-serial conversion
+- Serial-to-parallel conversion
+- Baud-rate timing generation
+- Parameterized RTL
+- Digital design verification
+- SystemVerilog testbench development
+- Waveform-based debugging
+- Edge-case testing
+- FPGA synthesis
+- FPGA implementation
+- Resource utilization analysis
+- Static timing analysis
+- RTL architecture documentation
+- GitHub-based project documentation
 
-Possible extensions include:
+---
 
-Configurable parity support
-5/6/7/8 data-bit configurations
-Multiple stop-bit configurations
-Baud-rate error handling
-RX oversampling
-FIFO buffering
-Break detection
-Framing error flags
-Parity error flags
-AXI4-Lite register interface
-FPGA board-level UART validation
-Project Status
+# Engineering Workflow
 
-Completed
+The project followed a typical RTL development workflow:
 
-RTL Design              ✓
-TX Verification         ✓
-RX Verification         ✓
-Full-Duplex Verification ✓
-Synthesis               ✓
-Implementation          ✓
-Timing Analysis         ✓
-Resource Analysis       ✓
-Documentation           ✓
-Author
+```text
+Specification
+      ↓
+Architecture
+      ↓
+RTL Design
+      ↓
+Module-Level Verification
+      ↓
+Integration
+      ↓
+Full-Duplex Verification
+      ↓
+Debugging
+      ↓
+Synthesis
+      ↓
+Implementation
+      ↓
+Timing Analysis
+      ↓
+Resource Analysis
+      ↓
+Documentation
+      ↓
+GitHub
+```
 
-Sutej Vedula
+---
+
+# Verification Summary
+
+| Verification Stage | Result |
+|---|---|
+| TX Module Simulation | PASS |
+| RX Module Simulation | PASS |
+| Invalid Stop-Bit Test | PASS |
+| Full-Duplex Loopback | PASS |
+| Synthesis | PASS |
+| Implementation | PASS |
+| Timing Analysis | PASS |
+| Setup Violations | 0 |
+| Hold Violations | 0 |
+| Pulse Width Violations | 0 |
+
+---
+
+# Future Improvements
+
+Potential extensions for future versions include:
+
+- Configurable parity support
+- 5/6/7/8 data-bit configurations
+- Multiple stop-bit configurations
+- Fractional baud-rate generation
+- RX oversampling
+- Framing-error status
+- Overrun detection
+- Receive buffering
+- FIFO integration
+- UART interrupt interface
+- AXI4-Lite register-mapped UART peripheral
+- FPGA hardware validation using a physical development board
+
+---
+
+# Project Status
+
+**Status: Completed**
+
+The UART Full-Duplex Transceiver has been:
+
+- Designed in SystemVerilog
+- Functionally verified
+- Integrated using a top-level RTL module
+- Verified using full-duplex loopback
+- Synthesized successfully
+- Implemented successfully
+- Analyzed for resource utilization
+- Analyzed for static timing
+- Documented with RTL architecture and simulation/implementation results
+- Published on GitHub
+
+---
+
+# Author
+
+**Sutej Vedula**
 
 B.Tech Electronics and Communication Engineering
 
-License
+---
+
+# License
+
+This project is licensed under the **MIT License**.
+
+See the `LICENSE` file for details.
 
 This project is intended for educational, portfolio, and RTL design practice purposes.
